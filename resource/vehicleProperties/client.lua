@@ -85,6 +85,7 @@ if cache.game == 'redm' then return end
 ---@field tyres? table<number | string, 1 | 2>
 ---@field bulletProofTyres? boolean
 ---@field driftTyres? boolean
+---@field wheelsRotation? table<number>
 
 ---@deprecated
 ---Not recommended. Entity owners can change rapidly and sporadically.
@@ -99,29 +100,20 @@ RegisterNetEvent('ox_lib:setVehicleProperties', function(netid, data)
     end
 end)
 
-AddStateBagChangeHandler('ox_lib:setVehicleProperties', '', function(bagName, _, value)
+--[[ Alternative to NetEvent - disabled (at least for now?)
+AddStateBagChangeHandler('setVehicleProperties', '', function(bagName, _, value)
     if not value or not GetEntityFromStateBagName then return end
 
-    while NetworkIsInTutorialSession() do Wait(0) end
+    local entity = GetEntityFromStateBagName(bagName)
+    local networked = not bagName:find('localEntity')
 
-    local entityExists, entity = pcall(lib.waitFor, function()
-        local entity = GetEntityFromStateBagName(bagName)
+    if networked and NetworkGetEntityOwner(entity) ~= cache.playerId then return end
 
-        if entity > 0 then return entity end
-    end, '', 10000)
-
-    if not entityExists then return end
-
-    lib.setVehicleProperties(entity, value)
-    Wait(200)
-
-    -- this delay and second-setting of vehicle properties hopefully counters the
-    -- weird sync/ownership/shitfuckery when setting props on server-side vehicles
-    if NetworkGetEntityOwner(entity) == cache.playerId then
-        lib.setVehicleProperties(entity, value)
-        Entity(entity).state:set('ox_lib:setVehicleProperties', nil, true)
+    if lib.setVehicleProperties(entity, value) then
+        Entity(entity).state:set('setVehicleProperties', nil, true)
     end
 end)
+]]
 
 local gameBuild = GetGameBuildNumber()
 
@@ -196,6 +188,12 @@ function lib.getVehicleProperties(vehicle)
             neons[i + 1] = IsVehicleNeonLightEnabled(vehicle, i)
         end
 
+        local rotations = {}
+
+        for i = 0, 4 do
+            rotations[i] = GetVehicleWheelYRotation(vehicle, i)
+        end
+
         return {
             model = GetEntityModel(vehicle),
             plate = GetVehicleNumberPlateText(vehicle),
@@ -218,7 +216,7 @@ function lib.getVehicleProperties(vehicle)
             wheelSize = GetVehicleWheelSize(vehicle),
             wheels = GetVehicleWheelType(vehicle),
             windowTint = GetVehicleWindowTint(vehicle),
-            xenonColor = GetVehicleXenonLightsColor(vehicle),
+            xenonColor = { GetVehicleXenonLightsCustomColor(vehicle) },
             neonEnabled = neons,
             neonColor = { GetVehicleNeonLightsColour(vehicle) },
             extras = extras,
@@ -281,6 +279,7 @@ function lib.getVehicleProperties(vehicle)
             tyres = damage.tyres,
             bulletProofTyres = GetVehicleTyresCanBurst(vehicle),
             driftTyres = gameBuild >= 2372 and GetDriftTyresEnabled(vehicle),
+            wheelsRotation = rotations
             -- no setters?
             -- leftHeadlight = GetIsLeftVehicleHeadlightDamaged(vehicle),
             -- rightHeadlight = GetIsRightVehicleHeadlightDamaged(vehicle),
@@ -518,7 +517,7 @@ function lib.setVehicleProperties(vehicle, props, fixVehicle)
     end
 
     if props.xenonColor then
-        SetVehicleXenonLightsColor(vehicle, props.xenonColor)
+        SetVehicleXenonLightsCustomColor(vehicle, props.xenonColor[2], props.xenonColor[3], props.xenonColor[4])
     end
 
     if props.modFrontWheels then
@@ -636,6 +635,12 @@ function lib.setVehicleProperties(vehicle, props, fixVehicle)
 
     if props.bulletProofTyres ~= nil then
         SetVehicleTyresCanBurst(vehicle, props.bulletProofTyres)
+    end
+
+    if props.wheelsRotation then
+        for i = 0, #props.wheelsRotation do
+            SetVehicleWheelYRotation(vehicle, i, props.wheelsRotation[i])
+        end
     end
 
     if gameBuild >= 2372 and props.driftTyres then
